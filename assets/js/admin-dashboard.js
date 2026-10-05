@@ -1111,4 +1111,52 @@ jQuery(document).ready(function($) {
             }
         });
     }
+
+    // 13. Instant Stock-Only Sync Button Handler
+    $('#btn-run-stock-sync').on('click', function(e) {
+        e.preventDefault();
+        var $btn = $(this);
+        var $res = $('#stock-sync-instant-result');
+        var sinceHours = $('#select-stock-since-hours').val() || 1;
+
+        $btn.prop('disabled', true).addClass('loading');
+        $res.slideUp().removeClass('success-alert error-alert');
+
+        $.ajax({
+            url: wcErpSyncLocal.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'wc_erp_sync_run_stock_sync',
+                since_hours: sinceHours,
+                security: wcErpSyncLocal.nonce
+            },
+            success: function(response) {
+                $btn.prop('disabled', false).removeClass('loading');
+                if (response.success && response.data) {
+                    var msg = response.data.message || 'Stock synchronization completed.';
+                    $res.addClass('success-alert').html('<strong>✓ ' + escapeHtml(msg) + '</strong>').slideDown();
+                    $res.css({
+                        'background': 'var(--success-bg)',
+                        'color': 'var(--success-color)',
+                        'padding': '10px',
+                        'border-radius': '4px'
+                    });
+                } else {
+                    var errMsg = (response.data && response.data.message) ? response.data.message : 'Stock sync encountered an error.';
+                    $res.addClass('error-alert').html('<strong>✗ ' + escapeHtml(errMsg) + '</strong>').slideDown();
+                    $res.css({
+                        'background': 'var(--danger-bg)',
+                        'color': 'var(--danger-color)',
+                        'padding': '10px',
+                        'border-radius': '4px'
+                    });
+                }
+            },
+            error: function() {
+                $btn.prop('disabled', false).removeClass('loading');
+                $res.html('<strong>✗ AJAX Error during stock sync. Check server logs.</strong>').slideDown();
+            }
+        });
+    });
 });
+

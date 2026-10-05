@@ -403,6 +403,70 @@ class SoundImportsClient extends AbstractClient {
 		];
 	}
 
+	/**
+	 * Fetch audit list of stock quantity updates from the SoundImports Scraper FastAPI endpoint.
+	 * Endpoint: GET api/stock-updates?since_hours={hours}&page={page}&limit={limit}
+	 *
+	 * @param int   $since_hours Filter updates in last N hours (e.g. 1, 2, 4, 24).
+	 * @param array $params      Additional parameters (page, limit).
+	 * @return array Array with total, page, limit, updates.
+	 */
+	public function fetch_stock_updates( $since_hours = 1, $params = [] ) {
+		$this->load_settings();
+
+		$hours = max( 1, intval( $since_hours ) );
+		$page  = isset( $params['page'] ) ? max( 1, intval( $params['page'] ) ) : 1;
+		$limit = isset( $params['limit'] ) ? max( 1, min( 500, intval( $params['limit'] ) ) ) : 100;
+
+		Logger::info( sprintf( 'Fetching live stock updates from API (since_hours=%d, page=%d, limit=%d)...', $hours, $page, $limit ), 'api_client' );
+
+		$query_args = [
+			'since_hours' => $hours,
+			'page'        => $page,
+			'limit'       => $limit,
+		];
+
+		$endpoint = 'api/stock-updates?' . http_build_query( $query_args );
+		$response = $this->request( $endpoint, 'GET' );
+
+		if ( is_wp_error( $response ) ) {
+			Logger::warning( sprintf( 'Endpoint api/stock-updates response notice: %s', $response->get_error_message() ), 'api_client' );
+			return [
+				'total'   => 0,
+				'page'    => $page,
+				'limit'   => $limit,
+				'updates' => [],
+				'error'   => $response->get_error_message(),
+			];
+		}
+
+		$body = wp_remote_retrieve_body( $response );
+		$data = json_decode( $body, true );
+
+		if ( ! is_array( $data ) || ! isset( $data['updates'] ) ) {
+			Logger::warning( 'Unexpected response format from api/stock-updates.', 'api_client', [ 'body' => substr( (string) $body, 0, 300 ) ] );
+			return [
+				'total'   => 0,
+				'page'    => $page,
+				'limit'   => $limit,
+				'updates' => [],
+				'error'   => 'Invalid JSON structure from stock-updates endpoint.',
+			];
+		}
+
+		$updates = is_array( $data['updates'] ) ? $data['updates'] : [];
+		$total   = isset( $data['total'] ) ? intval( $data['total'] ) : count( $updates );
+
+		Logger::info( sprintf( 'Retrieved %d stock updates from api/stock-updates (Total: %d, since_hours=%d).', count( $updates ), $total, $hours ), 'api_client' );
+
+		return [
+			'total'   => $total,
+			'page'    => $page,
+			'limit'   => $limit,
+			'updates' => $updates,
+		];
+	}
+
 	public function fetch_stock_levels( $external_ids = [] ) {
 		$dummy = new DummyClient();
 		return $dummy->fetch_stock_levels( $external_ids );

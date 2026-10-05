@@ -373,5 +373,32 @@ window.wcErpInitialCategories = <?php echo wp_json_encode( $api_categories ); ?>
 				<div id="incremental-sync-result" class="test-result-alert" style="display:none; margin-top: 10px;"></div>
 			</div>
 		</div>
+
+		<!-- 4. Quick Stock-Only Sync Tool -->
+		<div class="panel-card">
+			<div class="panel-header">
+				<h3><span class="dashicons dashicons-database-sync"></span> <?php esc_html_e( 'Instant Stock-Only Sync', 'wc-erp-sync' ); ?></h3>
+			</div>
+			<div class="panel-body">
+				<p class="box-desc">
+					<?php esc_html_e( 'Fetch and update live inventory levels immediately without re-downloading images or descriptions.', 'wc-erp-sync' ); ?>
+				</p>
+				<div class="form-group mb-12" style="margin-bottom: 12px;">
+					<label for="select-stock-since-hours" style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;"><?php esc_html_e( 'Stock Update Time Window:', 'wc-erp-sync' ); ?></label>
+					<select id="select-stock-since-hours" class="input-select" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1;">
+						<option value="1"><?php esc_html_e( 'Last 1 Hour (Recent Updates)', 'wc-erp-sync' ); ?></option>
+						<option value="2"><?php esc_html_e( 'Last 2 Hours', 'wc-erp-sync' ); ?></option>
+						<option value="4"><?php esc_html_e( 'Last 4 Hours', 'wc-erp-sync' ); ?></option>
+						<option value="6"><?php esc_html_e( 'Last 6 Hours', 'wc-erp-sync' ); ?></option>
+						<option value="12"><?php esc_html_e( 'Last 12 Hours', 'wc-erp-sync' ); ?></option>
+						<option value="24"><?php esc_html_e( 'Last 24 Hours (Full Day)', 'wc-erp-sync' ); ?></option>
+					</select>
+				</div>
+				<button type="button" id="btn-run-stock-sync" class="btn btn-outline btn-block">
+					<span class="dashicons dashicons-update"></span> <?php esc_html_e( 'Run Stock Sync Now', 'wc-erp-sync' ); ?>
+				</button>
+				<div id="stock-sync-instant-result" class="test-result-alert" style="display:none; margin-top: 10px;"></div>
+			</div>
+		</div>
 	</div>
 </div>

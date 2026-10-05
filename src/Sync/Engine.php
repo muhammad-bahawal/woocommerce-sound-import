@@ -501,5 +501,201 @@ class Engine {
 			'total'     => isset( $response['total'] ) ? intval( $response['total'] ) : 0,
 		];
 	}
+
+	/**
+	 * Run fast stock-only update directly from API.
+	 * Updates stock quantity and stock status in WooCommerce without re-downloading images or rewriting metadata.
+	 *
+	 * @param int $since_hours Number of hours to look back (default 1).
+	 * @return array Stats of updated products [ 'success' => bool, 'updated' => int, 'skipped' => int, 'failed' => int, 'message' => string ]
+	 */
+	public static function run_stock_only_sync( $since_hours = 1 ) {
+		$hours = max( 1, intval( $since_hours ) );
+		Logger::info( sprintf( 'Starting automated stock-only sync (since_hours=%d)...', $hours ), 'stock_sync' );
+
+		$client  = \WCErpSync\API\ClientFactory::get_client();
+		$updated = 0;
+		$skipped = 0;
+		$failed  = 0;
+
+		// 1. Primary Method: Use dedicated delta endpoint GET /api/stock-updates (with pagination to update ALL products)
+		$page          = 1;
+		$limit         = 200;
+		$has_more      = true;
+		$found_updates = false;
+
+		while ( $has_more ) {
+			$stock_res = method_exists( $client, 'fetch_stock_updates' ) ? $client->fetch_stock_updates( $hours, [ 'page' => $page, 'limit' => $limit ] ) : null;
+
+			if ( empty( $stock_res['updates'] ) || ! is_array( $stock_res['updates'] ) ) {
+				break;
+			}
+
+			$found_updates = true;
+			foreach ( $stock_res['updates'] as $update ) {
+				$sku = isset( $update['sku'] ) ? sanitize_text_field( $update['sku'] ) : '';
+				if ( empty( $sku ) ) {
+					continue;
+				}
+
+				$product_id = wc_get_product_id_by_sku( $sku );
+				if ( ! $product_id ) {
+					$skipped++;
+					continue;
+				}
+
+				$new_stock  = isset( $update['new_stock'] ) && null !== $update['new_stock'] ? max( 0, intval( $update['new_stock'] ) ) : null;
+				$new_status = isset( $update['new_status'] ) ? strtolower( trim( (string) $update['new_status'] ) ) : '';
+
+				$res = self::apply_product_stock_update( $product_id, $new_stock, $new_status );
+				if ( $res ) {
+					$updated++;
+					Logger::info( sprintf( 'Stock updated for SKU %s (WC ID: %d) -> Stock: %s, Status: %s', $sku, $product_id, null !== $new_stock ? $new_stock : 'auto', $new_status ), 'stock_sync' );
+				} else {
+					$failed++;
+				}
+			}
+
+			$total_avail = isset( $stock_res['total'] ) ? intval( $stock_res['total'] ) : 0;
+			if ( count( $stock_res['updates'] ) < $limit || ( $total_avail > 0 && ( $page * $limit ) >= $total_avail ) || $page >= 20 ) {
+				$has_more = false;
+			} else {
+				$page++;
+			}
+		}
+
+		if ( $found_updates ) {
+			$msg = sprintf( 'Stock sync completed via /api/stock-updates. %d products updated, %d skipped, %d failed.', $updated, $skipped, $failed );
+			Logger::info( $msg, 'stock_sync' );
+
+			return [
+				'success' => true,
+				'updated' => $updated,
+				'skipped' => $skipped,
+				'failed'  => $failed,
+				'source'  => 'stock_updates_endpoint',
+				'message' => $msg,
+			];
+		}
+
+		// 2. Safe Fallback: If /api/stock-updates returned empty or backend has temporary 500 error,
+		// query changed products by date and update their stock without downloading images!
+		$date_since = date( 'Y-m-d', strtotime( "-{$hours} hours" ) );
+		Logger::info( sprintf( 'Notice: /api/stock-updates returned 0 items. Running safe fallback for changed products since %s...', $date_since ), 'stock_sync' );
+
+		$changed = method_exists( $client, 'fetch_changed_products' ) ? $client->fetch_changed_products( $date_since ) : [];
+		if ( ! empty( $changed['product_ids'] ) && is_array( $changed['product_ids'] ) ) {
+			foreach ( $changed['product_ids'] as $ext_id ) {
+				$local_id = \WCErpSync\Database\MappingTable::get_local_id( 'product', (string) $ext_id );
+				if ( ! $local_id ) {
+					continue;
+				}
+
+				$product = wc_get_product( $local_id );
+				if ( ! $product ) {
+					continue;
+				}
+
+				$sku = $product->get_sku();
+				if ( empty( $sku ) ) {
+					continue;
+				}
+
+				$detail = $client->fetch_product_by_sku( $sku );
+				if ( ! empty( $detail ) ) {
+					$new_stock  = isset( $detail['stock'] ) ? $detail['stock'] : null;
+					$new_status = isset( $detail['stock_status'] ) ? $detail['stock_status'] : '';
+					$res = self::apply_product_stock_update( $local_id, $new_stock, $new_status );
+					if ( $res ) {
+						$updated++;
+					}
+				}
+			}
+		}
+
+		$msg = sprintf( 'Stock sync completed. %d products updated (fallback mode for changes since %s).', $updated, $date_since );
+		Logger::info( $msg, 'stock_sync' );
+
+		return [
+			'success' => true,
+			'updated' => $updated,
+			'skipped' => $skipped,
+			'failed'  => $failed,
+			'source'  => 'fallback',
+			'message' => $msg,
+		];
+	}
+
+	/**
+	 * Apply stock quantity and status updates to a WooCommerce product.
+	 */
+	public static function apply_product_stock_update( $product_id, $new_stock, $new_status = '' ) {
+		$product = wc_get_product( $product_id );
+		if ( ! $product ) {
+			return false;
+		}
+
+		if ( null !== $new_stock ) {
+			$stock_qty = max( 0, intval( $new_stock ) );
+			$status    = $stock_qty > 0 ? 'instock' : 'outofstock';
+
+			$product->set_manage_stock( true );
+			$product->set_stock_quantity( $stock_qty );
+			$product->set_stock_status( $status );
+			$product->set_backorders( 'no' );
+			$product->save();
+
+			update_post_meta( $product_id, '_manage_stock', 'yes' );
+			update_post_meta( $product_id, '_stock', $stock_qty );
+			update_post_meta( $product_id, '_stock_status', $status );
+			update_post_meta( $product_id, '_backorders', 'no' );
+
+			global $wpdb;
+			if ( ! empty( $wpdb->wc_product_meta_lookup ) ) {
+				$wpdb->update(
+					$wpdb->wc_product_meta_lookup,
+					[
+						'stock_quantity' => $stock_qty,
+						'stock_status'   => $status,
+					],
+					[ 'product_id' => $product_id ]
+				);
+			}
+
+			if ( function_exists( 'wc_delete_product_transients' ) ) {
+				wc_delete_product_transients( $product_id );
+			}
+			clean_post_cache( $product_id );
+
+			return true;
+		} elseif ( ! empty( $new_status ) ) {
+			$raw_status   = strtolower( trim( (string) $new_status ) );
+			$status_clean = in_array( $raw_status, [ 'out_of_stock', 'outofstock', 'out of stock' ], true ) ? 'outofstock' : 'instock';
+
+			$product->set_stock_status( $status_clean );
+			$product->save();
+
+			update_post_meta( $product_id, '_stock_status', $status_clean );
+
+			global $wpdb;
+			if ( ! empty( $wpdb->wc_product_meta_lookup ) ) {
+				$wpdb->update(
+					$wpdb->wc_product_meta_lookup,
+					[ 'stock_status' => $status_clean ],
+					[ 'product_id' => $product_id ]
+				);
+			}
+
+			if ( function_exists( 'wc_delete_product_transients' ) ) {
+				wc_delete_product_transients( $product_id );
+			}
+			clean_post_cache( $product_id );
+
+			return true;
+		}
+
+		return false;
+	}
 }
+
 

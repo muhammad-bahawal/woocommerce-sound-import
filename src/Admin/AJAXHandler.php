@@ -44,6 +44,7 @@ class AJAXHandler {
 			'get_categories',
 			'run_category_sync',
 			'process_category_batch',
+			'run_stock_sync',
 		];
 
 		foreach ( $ajax_actions as $action ) {
@@ -435,6 +436,25 @@ class AJAXHandler {
 
 		$result = Engine::process_category_manual_batch( $history_id, $category_id, $page, $batch_size, $include_children );
 		wp_send_json_success( $result );
+	}
+
+	/**
+	 * Run fast stock-only sync directly via AJAX.
+	 */
+	public static function handle_run_stock_sync() {
+		self::verify_request();
+
+		@set_time_limit( 300 );
+		@ini_set( 'max_execution_time', '300' );
+
+		$since_hours = isset( $_POST['since_hours'] ) ? max( 1, intval( $_POST['since_hours'] ) ) : 1;
+		$result      = Engine::run_stock_only_sync( $since_hours );
+
+		if ( ! empty( $result['success'] ) ) {
+			wp_send_json_success( $result );
+		} else {
+			wp_send_json_error( $result );
+		}
 	}
 }
 
