@@ -128,4 +128,58 @@ foreach ( $tables as $table_name ) {
 			</div>
 		</div>
 	</div>
+
+	<!-- Cron Schedule Diagnostics & Setup Guide -->
+	<div class="panel-card full-width" style="margin-top: 20px;">
+		<div class="panel-header">
+			<h3><span class="dashicons dashicons-clock"></span> <?php esc_html_e( 'Background Automation & Cron Schedules', 'wc-erp-sync' ); ?></h3>
+		</div>
+		<div class="panel-body">
+			<?php
+			$next_full  = wp_next_scheduled( \WCErpSync\Sync\Scheduler::CRON_ACTION );
+			$sched_full = wp_get_schedule( \WCErpSync\Sync\Scheduler::CRON_ACTION );
+			$next_stock = wp_next_scheduled( \WCErpSync\Sync\Scheduler::STOCK_CRON_ACTION );
+			$sched_stock= wp_get_schedule( \WCErpSync\Sync\Scheduler::STOCK_CRON_ACTION );
+			?>
+			<table class="dash-table status-info-table" style="margin-bottom: 20px;">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'Automation Task', 'wc-erp-sync' ); ?></th>
+						<th><?php esc_html_e( 'Hook Name', 'wc-erp-sync' ); ?></th>
+						<th><?php esc_html_e( 'Configured Frequency', 'wc-erp-sync' ); ?></th>
+						<th><?php esc_html_e( 'Next Scheduled Run', 'wc-erp-sync' ); ?></th>
+						<th><?php esc_html_e( 'Status', 'wc-erp-sync' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td><strong><?php esc_html_e( 'Full / Incremental Catalog Sync', 'wc-erp-sync' ); ?></strong></td>
+						<td><code>wc_erp_sync_run_cron</code></td>
+						<td><?php echo esc_html( $sched_full ? $sched_full : __( 'Not Scheduled / Manual', 'wc-erp-sync' ) ); ?></td>
+						<td><?php echo $next_full ? esc_html( date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $next_full ) . ' (' . human_time_diff( time(), $next_full ) . ')' ) : '<em>None</em>'; ?></td>
+						<td><span class="status-badge <?php echo $next_full ? 'completed' : 'failed'; ?>"><?php echo $next_full ? '✓ Scheduled' : 'Inactive'; ?></span></td>
+					</tr>
+					<tr>
+						<td><strong><?php esc_html_e( 'Automated Stock-Only Sync', 'wc-erp-sync' ); ?></strong></td>
+						<td><code>wc_erp_sync_auto_stock_cron</code></td>
+						<td><?php echo esc_html( $sched_stock ? $sched_stock : __( 'Not Scheduled', 'wc-erp-sync' ) ); ?></td>
+						<td><?php echo $next_stock ? esc_html( date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $next_stock ) . ' (' . human_time_diff( time(), $next_stock ) . ')' ) : '<em>None</em>'; ?></td>
+						<td><span class="status-badge <?php echo $next_stock ? 'completed' : 'failed'; ?>"><?php echo $next_stock ? '✓ Scheduled' : 'Inactive'; ?></span></td>
+					</tr>
+				</tbody>
+			</table>
+
+			<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px;">
+				<h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600; color: #1e293b;">
+					<span class="dashicons dashicons-info" style="color: #2563eb;"></span> <?php esc_html_e( 'Important Note for Staging / Inactive Websites:', 'wc-erp-sync' ); ?>
+				</h4>
+				<p style="margin: 0 0 10px 0; font-size: 13px; color: #475569; line-height: 1.5;">
+					<?php esc_html_e( 'WordPress built-in cron relies on frontend visitor traffic. If no visitors visit this staging website while you are logged out, WordPress background tasks stay asleep. To make background automation trigger 100% reliably 24/7 without logging in, add this command to your Server Crontab or cPanel Cron Jobs (Every 15-30 Minutes):', 'wc-erp-sync' ); ?>
+				</p>
+				<code style="display: block; background: #0f172a; color: #38bdf8; padding: 10px 14px; border-radius: 6px; font-size: 13px; user-select: all;">
+					wget -q -O - <?php echo esc_url( site_url( 'wp-cron.php?doing_wp_cron' ) ); ?> >/dev/null 2>&1
+				</code>
+			</div>
+		</div>
+	</div>
 </div>
