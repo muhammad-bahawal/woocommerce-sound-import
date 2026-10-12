@@ -1158,5 +1158,70 @@ jQuery(document).ready(function($) {
             }
         });
     });
+
+    // 14. Dynamic Dashboard Time Range Selector
+    $('#select-dash-time-range').on('change', function() {
+        var hours = $(this).val();
+        var $spinner = $('#dash-stats-spinner');
+        var hoursMap = {
+            '1': 'Last 1h',
+            '6': 'Last 6h',
+            '12': 'Last 12h',
+            '24': 'Last 24h',
+            '48': 'Last 48h',
+            '168': 'Last 7d'
+        };
+        var labelText = '(' + (hoursMap[hours] || ('Last ' + hours + 'h')) + ')';
+
+        $spinner.css('display', 'inline-block');
+
+        $.ajax({
+            url: wcErpSyncLocal.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'wc_erp_sync_get_dashboard_stats',
+                hours: hours,
+                security: wcErpSyncLocal.nonce
+            },
+            success: function(response) {
+                $spinner.hide();
+                if (response.success && response.data) {
+                    var d = response.data;
+
+                    if (typeof d.products_updated !== 'undefined') {
+                        $('#kpi-products-updated').text(Number(d.products_updated).toLocaleString());
+                    }
+                    if (typeof d.products_added !== 'undefined') {
+                        $('#kpi-products-added').text(Number(d.products_added).toLocaleString());
+                    }
+                    if (typeof d.stock_updated !== 'undefined') {
+                        $('#kpi-stock-updated').text(Number(d.stock_updated).toLocaleString());
+                    }
+                    if (typeof d.errors_window !== 'undefined') {
+                        $('#kpi-errors').text(Number(d.errors_window).toLocaleString());
+                    }
+                    if (typeof d.mapped_products !== 'undefined') {
+                        $('#kpi-mapped-products').text(Number(d.mapped_products).toLocaleString());
+                    }
+                    if (typeof d.success_rate !== 'undefined') {
+                        $('#kpi-success-rate').text(d.success_rate + '%');
+                    }
+                    if (typeof d.pending_queue !== 'undefined') {
+                        $('#kpi-pending-queue').text(Number(d.pending_queue).toLocaleString());
+                    }
+
+                    // Update label badges
+                    $('#lbl-updated-range').text(labelText);
+                    $('#lbl-added-range').text(labelText);
+                    $('#lbl-stock-range').text(labelText);
+                    $('#lbl-error-range').text(labelText);
+                }
+            },
+            error: function() {
+                $spinner.hide();
+            }
+        });
+    });
 });
+
 

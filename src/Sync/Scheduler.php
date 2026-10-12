@@ -118,15 +118,22 @@ class Scheduler {
 	public static function run_scheduled_sync() {
 		Logger::info( 'Starting scheduled sync loop...', 'scheduler' );
 		
-		// 1. Process sync queue items (e.g. pending orders, updates)
-		$processed = Engine::process_sync_queue( 20 );
+		$history_id = \WCErpSync\Database\HistoryTable::start_job( 'cron_incremental' );
+
+		// 1. Check ERP for changed products and queue them
+		$res = Engine::run_incremental_sync();
+		Logger::info( sprintf( 'Cron completed incremental scan. %d changed products queued for date %s.', $res['queued'], $res['since'] ), 'scheduler' );
+
+		// 2. Process sync queue items immediately (up to 50 items per cron cycle)
+		$processed = Engine::process_sync_queue( 50 );
 		if ( $processed > 0 ) {
 			Logger::info( sprintf( 'Cron completed processing %d queue items.', $processed ), 'scheduler' );
 		}
 
-		// 2. Perform incremental product sync from ERP for changed products
-		$res = Engine::run_incremental_sync();
-		Logger::info( sprintf( 'Cron completed incremental sync. %d changed products queued for date %s.', $res['queued'], $res['since'] ), 'scheduler' );
+		if ( $history_id ) {
+			\WCErpSync\Database\HistoryTable::update_job_progress( $history_id, $processed, $processed, 0 );
+			\WCErpSync\Database\HistoryTable::complete_job( $history_id, 'completed' );
+		}
 	}
 
 	/**

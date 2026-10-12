@@ -45,6 +45,7 @@ class AJAXHandler {
 			'run_category_sync',
 			'process_category_batch',
 			'run_stock_sync',
+			'get_dashboard_stats',
 		];
 
 		foreach ( $ajax_actions as $action ) {
@@ -455,6 +456,18 @@ class AJAXHandler {
 		} else {
 			wp_send_json_error( $result );
 		}
+	}
+
+	/**
+	 * Return dynamic dashboard statistics for custom time range.
+	 */
+	public static function handle_get_dashboard_stats() {
+		self::verify_request();
+
+		$hours = isset( $_POST['hours'] ) ? max( 1, intval( $_POST['hours'] ) ) : 24;
+		$stats = DashController::get_summary_stats( $hours );
+
+		wp_send_json_success( $stats );
 	}
 }
 

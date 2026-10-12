@@ -513,10 +513,11 @@ class Engine {
 		$hours = max( 1, intval( $since_hours ) );
 		Logger::info( sprintf( 'Starting automated stock-only sync (since_hours=%d)...', $hours ), 'stock_sync' );
 
-		$client  = \WCErpSync\API\ClientFactory::get_client();
-		$updated = 0;
-		$skipped = 0;
-		$failed  = 0;
+		$client     = \WCErpSync\API\ClientFactory::get_client();
+		$updated    = 0;
+		$skipped    = 0;
+		$failed     = 0;
+		$seen_skus  = [];
 
 		// 1. Primary Method: Use dedicated delta endpoint GET /api/stock-updates (with pagination to update ALL products)
 		$page          = 1;
@@ -537,6 +538,13 @@ class Engine {
 				if ( empty( $sku ) ) {
 					continue;
 				}
+
+				// Deduplication check: Audit records are sorted newest first.
+				// If we already updated this SKU in this run, skip older audit history records for it!
+				if ( isset( $seen_skus[ $sku ] ) ) {
+					continue;
+				}
+				$seen_skus[ $sku ] = true;
 
 				$product_id = wc_get_product_id_by_sku( $sku );
 				if ( ! $product_id ) {
@@ -564,9 +572,16 @@ class Engine {
 			}
 		}
 
+		$history_id = HistoryTable::start_job( 'auto_stock_sync' );
+
 		if ( $found_updates ) {
 			$msg = sprintf( 'Stock sync completed via /api/stock-updates. %d products updated, %d skipped, %d failed.', $updated, $skipped, $failed );
 			Logger::info( $msg, 'stock_sync' );
+
+			if ( $history_id ) {
+				HistoryTable::update_job_progress( $history_id, $updated + $failed + $skipped, $updated, $failed );
+				HistoryTable::complete_job( $history_id, 'completed' );
+			}
 
 			return [
 				'success' => true,
@@ -597,9 +612,10 @@ class Engine {
 				}
 
 				$sku = $product->get_sku();
-				if ( empty( $sku ) ) {
+				if ( empty( $sku ) || isset( $seen_skus[ $sku ] ) ) {
 					continue;
 				}
+				$seen_skus[ $sku ] = true;
 
 				$detail = $client->fetch_product_by_sku( $sku );
 				if ( ! empty( $detail ) ) {
@@ -615,6 +631,11 @@ class Engine {
 
 		$msg = sprintf( 'Stock sync completed. %d products updated (fallback mode for changes since %s).', $updated, $date_since );
 		Logger::info( $msg, 'stock_sync' );
+
+		if ( $history_id ) {
+			HistoryTable::update_job_progress( $history_id, $updated + $failed + $skipped, $updated, $failed );
+			HistoryTable::complete_job( $history_id, 'completed' );
+		}
 
 		return [
 			'success' => true,
@@ -635,20 +656,38 @@ class Engine {
 			return false;
 		}
 
+		$raw_status    = ! empty( $new_status ) ? strtolower( trim( (string) $new_status ) ) : '';
+		$is_backorder  = in_array( $raw_status, [ 'on_backorder', 'onbackorder', 'backorder' ], true );
+		$is_outofstock = in_array( $raw_status, [ 'out_of_stock', 'outofstock', 'out of stock' ], true );
+
 		if ( null !== $new_stock ) {
 			$stock_qty = max( 0, intval( $new_stock ) );
-			$status    = $stock_qty > 0 ? 'instock' : 'outofstock';
+
+			if ( $is_backorder ) {
+				$status        = 'onbackorder';
+				$backorder_val = 'notify';
+			} elseif ( $stock_qty > 0 && ! $is_outofstock ) {
+				$status        = 'instock';
+				$backorder_val = 'no';
+			} else {
+				$status        = 'outofstock';
+				$backorder_val = 'no';
+			}
 
 			$product->set_manage_stock( true );
 			$product->set_stock_quantity( $stock_qty );
 			$product->set_stock_status( $status );
-			$product->set_backorders( 'no' );
+			$product->set_backorders( $backorder_val );
 			$product->save();
 
 			update_post_meta( $product_id, '_manage_stock', 'yes' );
 			update_post_meta( $product_id, '_stock', $stock_qty );
 			update_post_meta( $product_id, '_stock_status', $status );
-			update_post_meta( $product_id, '_backorders', 'no' );
+			update_post_meta( $product_id, '_backorders', $backorder_val );
+			update_post_meta( $product_id, '_erp_sync_last_stock_update', time() );
+
+			// Touch stock update in mapping table
+			\WCErpSync\Database\MappingTable::touch_stock_update( $product_id );
 
 			global $wpdb;
 			if ( ! empty( $wpdb->wc_product_meta_lookup ) ) {
@@ -669,13 +708,27 @@ class Engine {
 
 			return true;
 		} elseif ( ! empty( $new_status ) ) {
-			$raw_status   = strtolower( trim( (string) $new_status ) );
-			$status_clean = in_array( $raw_status, [ 'out_of_stock', 'outofstock', 'out of stock' ], true ) ? 'outofstock' : 'instock';
+			if ( $is_backorder ) {
+				$status_clean  = 'onbackorder';
+				$backorder_val = 'notify';
+			} elseif ( $is_outofstock ) {
+				$status_clean  = 'outofstock';
+				$backorder_val = 'no';
+			} else {
+				$status_clean  = 'instock';
+				$backorder_val = 'no';
+			}
 
 			$product->set_stock_status( $status_clean );
+			$product->set_backorders( $backorder_val );
 			$product->save();
 
 			update_post_meta( $product_id, '_stock_status', $status_clean );
+			update_post_meta( $product_id, '_backorders', $backorder_val );
+			update_post_meta( $product_id, '_erp_sync_last_stock_update', time() );
+
+			// Touch stock update in mapping table
+			\WCErpSync\Database\MappingTable::touch_stock_update( $product_id );
 
 			global $wpdb;
 			if ( ! empty( $wpdb->wc_product_meta_lookup ) ) {

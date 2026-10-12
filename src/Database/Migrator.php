@@ -51,10 +51,14 @@ class Migrator {
 			local_id bigint(20) unsigned NOT NULL,
 			hash varchar(64) DEFAULT NULL,
 			last_sync_status varchar(20) NOT NULL DEFAULT 'success',
+			created_at datetime DEFAULT NULL,
 			updated_at datetime NOT NULL,
+			last_stock_updated_at datetime DEFAULT NULL,
 			PRIMARY KEY  (id),
 			UNIQUE KEY idx_entity_external (entity_type, external_id),
-			KEY idx_entity_local (entity_type, local_id)
+			KEY idx_entity_local (entity_type, local_id),
+			KEY idx_entity_updated (entity_type, updated_at),
+			KEY idx_entity_created (entity_type, created_at)
 		) $charset_collate;";
 
 		// 3. Database Logs Table
@@ -89,6 +93,9 @@ class Migrator {
 		foreach ( $sql as $query ) {
 			dbDelta( $query );
 		}
+
+		// Ensure created_at is populated for existing rows if created_at is NULL
+		$wpdb->query( "UPDATE $table_mappings SET created_at = updated_at WHERE created_at IS NULL" );
 
 		update_option( 'wc_erp_sync_db_version', WC_ERP_SYNC_VERSION );
 	}

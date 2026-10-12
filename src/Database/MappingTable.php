@@ -33,17 +33,17 @@ class MappingTable {
 			$external_id
 		) );
 
-		$data = [
-			'entity_type'      => $entity_type,
-			'external_id'      => $external_id,
-			'local_id'         => $local_id,
-			'hash'             => $hash,
-			'last_sync_status' => $last_sync_status,
-			'updated_at'       => $now,
-		];
-		$format = [ '%s', '%s', '%d', '%s', '%s', '%s' ];
-
 		if ( $existing_id ) {
+			$data = [
+				'entity_type'      => $entity_type,
+				'external_id'      => $external_id,
+				'local_id'         => $local_id,
+				'hash'             => $hash,
+				'last_sync_status' => $last_sync_status,
+				'updated_at'       => $now,
+			];
+			$format = [ '%s', '%s', '%d', '%s', '%s', '%s' ];
+
 			$result = $wpdb->update(
 				$table,
 				$data,
@@ -54,8 +54,63 @@ class MappingTable {
 			return $result !== false ? $existing_id : false;
 		}
 
+		$data = [
+			'entity_type'      => $entity_type,
+			'external_id'      => $external_id,
+			'local_id'         => $local_id,
+			'hash'             => $hash,
+			'last_sync_status' => $last_sync_status,
+			'created_at'       => $now,
+			'updated_at'       => $now,
+		];
+		$format = [ '%s', '%s', '%d', '%s', '%s', '%s', '%s' ];
+
 		$result = $wpdb->insert( $table, $data, $format );
 		return $result ? $wpdb->insert_id : false;
+	}
+
+	/**
+	 * Record or touch stock update timestamp for a product.
+	 */
+	public static function touch_stock_update( $local_id, $external_id = '' ) {
+		global $wpdb;
+		$table = self::get_table_name();
+		$now   = current_time( 'mysql' );
+
+		if ( ! empty( $local_id ) ) {
+			$updated = $wpdb->update(
+				$table,
+				[
+					'last_stock_updated_at' => $now,
+					'updated_at'            => $now,
+				],
+				[
+					'entity_type' => 'product',
+					'local_id'    => (int) $local_id,
+				],
+				[ '%s', '%s' ],
+				[ '%s', '%d' ]
+			);
+
+			if ( ! $updated && ! empty( $external_id ) ) {
+				$wpdb->update(
+					$table,
+					[
+						'last_stock_updated_at' => $now,
+						'updated_at'            => $now,
+					],
+					[
+						'entity_type' => 'product',
+						'external_id' => (string) $external_id,
+					],
+					[ '%s', '%s' ],
+					[ '%s', '%s' ]
+				);
+			}
+			return $updated;
+		}
+
+		return false;
 	}
 
 	/**
@@ -187,5 +242,98 @@ class MappingTable {
 		}
 
 		return (int) $wpdb->get_var( $query );
+	}
+
+	/**
+	 * Count new products created within the specified hours.
+	 */
+	public static function count_created_since( $hours = 24, $entity_type = 'product' ) {
+		global $wpdb;
+		$table = self::get_table_name();
+		$hours = max( 1, intval( $hours ) );
+
+		// Check if created_at column exists in table (dbDelta may not have run yet)
+		$has_col = $wpdb->get_results( "SHOW COLUMNS FROM $table LIKE 'created_at'" );
+		if ( empty( $has_col ) ) {
+			return 0;
+		}
+
+		$query = $wpdb->prepare(
+			"SELECT COUNT(id) FROM $table 
+			 WHERE entity_type = %s 
+			   AND created_at IS NOT NULL 
+			   AND created_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)",
+			$entity_type,
+			$hours
+		);
+
+		return (int) $wpdb->get_var( $query );
+	}
+
+	/**
+	 * Count existing products updated within the specified hours (excluding newly created ones in same window).
+	 */
+	public static function count_updated_since( $hours = 24, $entity_type = 'product' ) {
+		global $wpdb;
+		$table = self::get_table_name();
+		$hours = max( 1, intval( $hours ) );
+
+		$has_col = $wpdb->get_results( "SHOW COLUMNS FROM $table LIKE 'created_at'" );
+		if ( empty( $has_col ) ) {
+			// Fallback if created_at column not yet present
+			$query = $wpdb->prepare(
+				"SELECT COUNT(id) FROM $table 
+				 WHERE entity_type = %s 
+				   AND updated_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)",
+				$entity_type,
+				$hours
+			);
+			return (int) $wpdb->get_var( $query );
+		}
+
+		// Updated: updated_at within window AND (created_at is null OR created_at < updated_at or created_at outside window)
+		$query = $wpdb->prepare(
+			"SELECT COUNT(id) FROM $table 
+			 WHERE entity_type = %s 
+			   AND updated_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)
+			   AND (created_at IS NULL OR created_at < DATE_SUB(updated_at, INTERVAL 5 SECOND))",
+			$entity_type,
+			$hours
+		);
+
+		return (int) $wpdb->get_var( $query );
+	}
+
+	/**
+	 * Count products whose stock was specifically updated within the specified hours.
+	 */
+	public static function count_stock_updated_since( $hours = 24 ) {
+		global $wpdb;
+		$table = self::get_table_name();
+		$hours = max( 1, intval( $hours ) );
+
+		$has_col = $wpdb->get_results( "SHOW COLUMNS FROM $table LIKE 'last_stock_updated_at'" );
+		$count   = 0;
+
+		if ( ! empty( $has_col ) ) {
+			$query = $wpdb->prepare(
+				"SELECT COUNT(id) FROM $table 
+				 WHERE entity_type = 'product' 
+				   AND last_stock_updated_at IS NOT NULL 
+				   AND last_stock_updated_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)",
+				$hours
+			);
+			$count = (int) $wpdb->get_var( $query );
+		}
+
+		// Also check WooCommerce post meta _erp_sync_last_stock_update as secondary source / fallback
+		$meta_count = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(DISTINCT post_id) FROM {$wpdb->postmeta} 
+			 WHERE meta_key = '_erp_sync_last_stock_update' 
+			   AND meta_value >= %d",
+			time() - ( $hours * 3600 )
+		) );
+
+		return max( $count, $meta_count );
 	}
 }

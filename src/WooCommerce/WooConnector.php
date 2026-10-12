@@ -81,18 +81,39 @@ class WooConnector {
 
 		// Inventory / Stock Quantity & Status handling
 		$has_stock_val = isset( $data['stock'] ) && null !== $data['stock'] && '' !== $data['stock'];
+		$passed_status = ! empty( $data['stock_status'] ) ? strtolower( trim( (string) $data['stock_status'] ) ) : '';
+		$is_backorder  = in_array( $passed_status, [ 'on_backorder', 'onbackorder', 'backorder' ], true );
+
 		if ( $has_stock_val ) {
 			$stock_quantity = max( 0, intval( $data['stock'] ) );
-			$stock_status   = $stock_quantity > 0 ? 'instock' : 'outofstock';
+			if ( $is_backorder ) {
+				$stock_status  = 'onbackorder';
+				$backorder_val = 'notify';
+			} elseif ( $stock_quantity > 0 ) {
+				$stock_status  = 'instock';
+				$backorder_val = 'no';
+			} else {
+				$stock_status  = 'outofstock';
+				$backorder_val = 'no';
+			}
 			$product->set_manage_stock( true );
 			$product->set_stock_quantity( $stock_quantity );
 			$product->set_stock_status( $stock_status );
-			$product->set_backorders( 'no' );
-		} elseif ( isset( $data['stock_status'] ) && ! empty( $data['stock_status'] ) ) {
-			$raw_status = strtolower( trim( (string) $data['stock_status'] ) );
-			$status_val = in_array( $raw_status, [ 'out_of_stock', 'outofstock', 'out of stock' ], true ) ? 'outofstock' : 'instock';
+			$product->set_backorders( $backorder_val );
+		} elseif ( ! empty( $passed_status ) ) {
+			if ( $is_backorder ) {
+				$status_val    = 'onbackorder';
+				$backorder_val = 'notify';
+			} elseif ( in_array( $passed_status, [ 'out_of_stock', 'outofstock', 'out of stock' ], true ) ) {
+				$status_val    = 'outofstock';
+				$backorder_val = 'no';
+			} else {
+				$status_val    = 'instock';
+				$backorder_val = 'no';
+			}
 			$product->set_manage_stock( false );
 			$product->set_stock_status( $status_val );
+			$product->set_backorders( $backorder_val );
 		}
 
 		if ( 'simple' === $product->get_type() ) {
@@ -190,11 +211,20 @@ class WooConnector {
 		// Re-assert stock property prior to save
 		if ( $has_stock_val ) {
 			$stock_quantity = max( 0, intval( $data['stock'] ) );
-			$stock_status   = $stock_quantity > 0 ? 'instock' : 'outofstock';
+			if ( $is_backorder ) {
+				$stock_status  = 'onbackorder';
+				$backorder_val = 'notify';
+			} elseif ( $stock_quantity > 0 ) {
+				$stock_status  = 'instock';
+				$backorder_val = 'no';
+			} else {
+				$stock_status  = 'outofstock';
+				$backorder_val = 'no';
+			}
 			$product->set_manage_stock( true );
 			$product->set_stock_quantity( $stock_quantity );
 			$product->set_stock_status( $stock_status );
-			$product->set_backorders( 'no' );
+			$product->set_backorders( $backorder_val );
 		}
 
 		$product_id = $product->save();
@@ -203,12 +233,21 @@ class WooConnector {
 		if ( $product_id ) {
 			if ( $has_stock_val ) {
 				$stock_quantity = max( 0, intval( $data['stock'] ) );
-				$stock_status   = $stock_quantity > 0 ? 'instock' : 'outofstock';
+				if ( $is_backorder ) {
+					$stock_status  = 'onbackorder';
+					$backorder_val = 'notify';
+				} elseif ( $stock_quantity > 0 ) {
+					$stock_status  = 'instock';
+					$backorder_val = 'no';
+				} else {
+					$stock_status  = 'outofstock';
+					$backorder_val = 'no';
+				}
 
 				update_post_meta( $product_id, '_manage_stock', 'yes' );
 				update_post_meta( $product_id, '_stock', $stock_quantity );
 				update_post_meta( $product_id, '_stock_status', $stock_status );
-				update_post_meta( $product_id, '_backorders', 'no' );
+				update_post_meta( $product_id, '_backorders', $backorder_val );
 
 				global $wpdb;
 				if ( ! empty( $wpdb->wc_product_meta_lookup ) ) {
@@ -226,11 +265,20 @@ class WooConnector {
 					wc_delete_product_transients( $product_id );
 				}
 				clean_post_cache( $product_id );
-			} elseif ( isset( $data['stock_status'] ) && ! empty( $data['stock_status'] ) ) {
-				$raw_status = strtolower( trim( (string) $data['stock_status'] ) );
-				$status_val = in_array( $raw_status, [ 'out_of_stock', 'outofstock', 'out of stock' ], true ) ? 'outofstock' : 'instock';
+			} elseif ( ! empty( $passed_status ) ) {
+				if ( $is_backorder ) {
+					$status_val    = 'onbackorder';
+					$backorder_val = 'notify';
+				} elseif ( in_array( $passed_status, [ 'out_of_stock', 'outofstock', 'out of stock' ], true ) ) {
+					$status_val    = 'outofstock';
+					$backorder_val = 'no';
+				} else {
+					$status_val    = 'instock';
+					$backorder_val = 'no';
+				}
 				update_post_meta( $product_id, '_manage_stock', 'no' );
 				update_post_meta( $product_id, '_stock_status', $status_val );
+				update_post_meta( $product_id, '_backorders', $backorder_val );
 				delete_post_meta( $product_id, '_stock' );
 
 				global $wpdb;
@@ -442,6 +490,10 @@ class WooConnector {
 		update_post_meta( $product_id, '_stock', $stock_quantity );
 		update_post_meta( $product_id, '_stock_status', $stock_status );
 		update_post_meta( $product_id, '_backorders', 'no' );
+		update_post_meta( $product_id, '_erp_sync_last_stock_update', time() );
+
+		// Touch stock update timestamp in MappingTable
+		\WCErpSync\Database\MappingTable::touch_stock_update( $product_id );
 
 		global $wpdb;
 		if ( ! empty( $wpdb->wc_product_meta_lookup ) ) {

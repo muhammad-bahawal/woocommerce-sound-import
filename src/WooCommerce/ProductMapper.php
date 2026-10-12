@@ -88,10 +88,10 @@ class ProductMapper {
 
 		// Standardize WooCommerce stock_status
 		$raw_status = ! empty( $raw_data['stock_status'] ) ? strtolower( trim( (string) $raw_data['stock_status'] ) ) : ( ! empty( $data['stock_status'] ) ? strtolower( trim( (string) $data['stock_status'] ) ) : '' );
-		if ( in_array( $raw_status, [ 'out_of_stock', 'outofstock', 'out of stock' ], true ) || ( null !== $stock_val && 0 === $stock_val ) ) {
-			$data['stock_status'] = 'outofstock';
-		} elseif ( in_array( $raw_status, [ 'on_backorder', 'onbackorder', 'backorder' ], true ) ) {
+		if ( in_array( $raw_status, [ 'on_backorder', 'onbackorder', 'backorder' ], true ) ) {
 			$data['stock_status'] = 'onbackorder';
+		} elseif ( in_array( $raw_status, [ 'out_of_stock', 'outofstock', 'out of stock' ], true ) || ( null !== $stock_val && 0 === $stock_val ) ) {
+			$data['stock_status'] = 'outofstock';
 		} else {
 			$data['stock_status'] = 'instock';
 		}

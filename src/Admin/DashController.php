@@ -16,10 +16,14 @@ use WCErpSync\Database\HistoryTable;
 class DashController {
 
 	/**
-	 * Compute card KPI metrics.
+	 * Compute card KPI metrics with dynamic time range.
+	 *
+	 * @param int $hours Lookback window in hours (default 24).
 	 */
-	public static function get_summary_stats() {
+	public static function get_summary_stats( $hours = 24 ) {
 		global $wpdb;
+
+		$hours = max( 1, intval( $hours ) );
 
 		// 1. Total products and categories mapped
 		$mapped_products   = MappingTable::count_mappings( 'product' );
@@ -30,13 +34,19 @@ class DashController {
 		$pending_queue = QueueTable::count_by_status( 'pending' );
 		$failed_queue  = QueueTable::count_by_status( 'failed' );
 
-		// 3. Error counts (last 24 hours)
-		$table_logs = LogTable::get_table_name();
-		$errors_24h = (int) $wpdb->get_var(
-			"SELECT COUNT(id) FROM $table_logs WHERE level = 'error' AND created_at > DATE_SUB(NOW(), INTERVAL 1 DAY)"
-		);
+		// 3. Dynamic Time-Window Activity Metrics (Requested by user)
+		$products_added   = MappingTable::count_created_since( $hours, 'product' );
+		$products_updated = MappingTable::count_updated_since( $hours, 'product' );
+		$stock_updated    = MappingTable::count_stock_updated_since( $hours );
 
-		// 4. Calculate Sync Success Rate
+		// 4. Error counts for the selected time window
+		$table_logs = LogTable::get_table_name();
+		$errors_window = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(id) FROM $table_logs WHERE level = 'error' AND created_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)",
+			$hours
+		) );
+
+		// 5. Calculate Sync Success Rate
 		$table_history = HistoryTable::get_table_name();
 		$history_stats = $wpdb->get_row(
 			"SELECT SUM(records_success) as success, SUM(records_failed) as failed FROM $table_history",
@@ -50,12 +60,17 @@ class DashController {
 		$success_rate = $total > 0 ? round( ( $success / $total ) * 100, 1 ) : 100;
 
 		return [
+			'hours'             => $hours,
 			'mapped_products'   => $mapped_products,
 			'mapped_categories' => $mapped_categories,
 			'mapped_vendors'    => $mapped_vendors,
 			'pending_queue'     => $pending_queue,
 			'failed_queue'      => $failed_queue,
-			'errors_24h'        => $errors_24h,
+			'products_added'    => $products_added,
+			'products_updated'  => $products_updated,
+			'stock_updated'     => $stock_updated,
+			'errors_24h'        => $errors_window,
+			'errors_window'     => $errors_window,
 			'success_rate'      => $success_rate,
 			'total_synced'      => $success,
 		];

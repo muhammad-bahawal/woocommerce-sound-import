@@ -11,45 +11,120 @@ $errors  = DashController::get_recent_errors( 5 );
 ?>
 
 <div class="dash-container">
+	<!-- Time Window Filter Header -->
+	<div class="dash-filter-bar" style="display: flex; justify-content: space-between; align-items: center; background: #ffffff; padding: 14px 20px; border-radius: var(--radius-md); border: 1px solid var(--border-color); margin-bottom: 20px; box-shadow: var(--shadow-sm); flex-wrap: wrap; gap: 12px;">
+		<div class="filter-title-group" style="display: flex; align-items: center; gap: 10px;">
+			<span class="dashicons dashicons-chart-pie" style="font-size: 20px; width: 20px; height: 20px; color: var(--primary-color);"></span>
+			<div>
+				<h4 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text-primary);"><?php esc_html_e( 'Sync Activity & Inventory Performance', 'wc-erp-sync' ); ?></h4>
+				<span style="font-size: 12px; color: var(--text-secondary);"><?php esc_html_e( 'View real-time synchronization metrics across customized time intervals.', 'wc-erp-sync' ); ?></span>
+			</div>
+		</div>
+
+		<div class="filter-controls" style="display: flex; align-items: center; gap: 10px;">
+			<label for="select-dash-time-range" style="font-size: 13px; font-weight: 600; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;">
+				<span class="dashicons dashicons-clock"></span> <?php esc_html_e( 'Time Range:', 'wc-erp-sync' ); ?>
+			</label>
+			<select id="select-dash-time-range" class="input-select" style="padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border-color); font-size: 13px; font-weight: 500; background: #f8fafc; color: var(--text-primary); cursor: pointer;">
+				<option value="1"><?php esc_html_e( 'Last 1 Hour', 'wc-erp-sync' ); ?></option>
+				<option value="6"><?php esc_html_e( 'Last 6 Hours', 'wc-erp-sync' ); ?></option>
+				<option value="12"><?php esc_html_e( 'Last 12 Hours', 'wc-erp-sync' ); ?></option>
+				<option value="24" selected><?php esc_html_e( 'Last 24 Hours (Default)', 'wc-erp-sync' ); ?></option>
+				<option value="48"><?php esc_html_e( 'Last 48 Hours', 'wc-erp-sync' ); ?></option>
+				<option value="168"><?php esc_html_e( 'Last 7 Days', 'wc-erp-sync' ); ?></option>
+			</select>
+			<span id="dash-stats-spinner" class="spinner" style="float: none; margin: 0; display: none;"></span>
+		</div>
+	</div>
+
 	<!-- Top Summary Cards -->
 	<section class="kpi-grid">
+		<!-- 1. Mapped Products (Total) -->
 		<div class="kpi-card">
 			<div class="kpi-icon-wrapper blue">
 				<span class="dashicons dashicons-archive"></span>
 			</div>
 			<div class="kpi-data">
-				<span class="kpi-value"><?php echo esc_html( $stats['mapped_products'] ); ?></span>
-				<span class="kpi-label"><?php esc_html_e( 'Mapped Products', 'wc-erp-sync' ); ?></span>
+				<span class="kpi-value" id="kpi-mapped-products"><?php echo esc_html( number_format_i18n( $stats['mapped_products'] ) ); ?></span>
+				<span class="kpi-label"><?php esc_html_e( 'Total Mapped Products', 'wc-erp-sync' ); ?></span>
 			</div>
 		</div>
 
+		<!-- 2. Products Updated in Selected Window -->
+		<div class="kpi-card" title="<?php esc_attr_e( 'Catalog products modified and synchronized from ERP within selected timeframe', 'wc-erp-sync' ); ?>">
+			<div class="kpi-icon-wrapper indigo" style="background: #eef2ff; color: #4f46e5;">
+				<span class="dashicons dashicons-saved"></span>
+			</div>
+			<div class="kpi-data">
+				<span class="kpi-value" id="kpi-products-updated"><?php echo esc_html( number_format_i18n( $stats['products_updated'] ) ); ?></span>
+				<span class="kpi-label">
+					<?php esc_html_e( 'Products Updated', 'wc-erp-sync' ); ?>
+					<small class="time-range-badge" id="lbl-updated-range" style="display: block; font-size: 11px; color: #6366f1; font-weight: 500;">(Last 24h)</small>
+				</span>
+			</div>
+		</div>
+
+		<!-- 3. New Products Added in Selected Window -->
+		<div class="kpi-card" title="<?php esc_attr_e( 'New products created and imported into store within selected timeframe', 'wc-erp-sync' ); ?>">
+			<div class="kpi-icon-wrapper teal" style="background: #f0fdfa; color: #0d9488;">
+				<span class="dashicons dashicons-plus-alt"></span>
+			</div>
+			<div class="kpi-data">
+				<span class="kpi-value" id="kpi-products-added"><?php echo esc_html( number_format_i18n( $stats['products_added'] ) ); ?></span>
+				<span class="kpi-label">
+					<?php esc_html_e( 'New Products Added', 'wc-erp-sync' ); ?>
+					<small class="time-range-badge" id="lbl-added-range" style="display: block; font-size: 11px; color: #0d9488; font-weight: 500;">(Last 24h)</small>
+				</span>
+			</div>
+		</div>
+
+		<!-- 4. Stock Updated Only in Selected Window -->
+		<div class="kpi-card" title="<?php esc_attr_e( 'Products with stock levels or status updated within selected timeframe', 'wc-erp-sync' ); ?>">
+			<div class="kpi-icon-wrapper cyan" style="background: #ecfeff; color: #0891b2;">
+				<span class="dashicons dashicons-database-sync"></span>
+			</div>
+			<div class="kpi-data">
+				<span class="kpi-value" id="kpi-stock-updated"><?php echo esc_html( number_format_i18n( $stats['stock_updated'] ) ); ?></span>
+				<span class="kpi-label">
+					<?php esc_html_e( 'Stock Only Updated', 'wc-erp-sync' ); ?>
+					<small class="time-range-badge" id="lbl-stock-range" style="display: block; font-size: 11px; color: #0891b2; font-weight: 500;">(Last 24h)</small>
+				</span>
+			</div>
+		</div>
+
+		<!-- 5. Sync Success Rate -->
 		<div class="kpi-card">
 			<div class="kpi-icon-wrapper green">
 				<span class="dashicons dashicons-cloud-saved"></span>
 			</div>
 			<div class="kpi-data">
-				<span class="kpi-value"><?php echo esc_html( $stats['success_rate'] ); ?>%</span>
+				<span class="kpi-value" id="kpi-success-rate"><?php echo esc_html( $stats['success_rate'] ); ?>%</span>
 				<span class="kpi-label"><?php esc_html_e( 'Sync Success Rate', 'wc-erp-sync' ); ?></span>
 			</div>
 		</div>
 
+		<!-- 6. Pending Queue Items -->
 		<div class="kpi-card">
 			<div class="kpi-icon-wrapper orange">
 				<span class="dashicons dashicons-list-view"></span>
 			</div>
 			<div class="kpi-data">
-				<span class="kpi-value"><?php echo esc_html( $stats['pending_queue'] ); ?></span>
+				<span class="kpi-value" id="kpi-pending-queue"><?php echo esc_html( number_format_i18n( $stats['pending_queue'] ) ); ?></span>
 				<span class="kpi-label"><?php esc_html_e( 'Pending Queue Items', 'wc-erp-sync' ); ?></span>
 			</div>
 		</div>
 
+		<!-- 7. Errors in Selected Window -->
 		<div class="kpi-card">
 			<div class="kpi-icon-wrapper red">
 				<span class="dashicons dashicons-warning"></span>
 			</div>
 			<div class="kpi-data">
-				<span class="kpi-value"><?php echo esc_html( $stats['errors_24h'] ); ?></span>
-				<span class="kpi-label"><?php esc_html_e( 'Errors (24h)', 'wc-erp-sync' ); ?></span>
+				<span class="kpi-value" id="kpi-errors"><?php echo esc_html( number_format_i18n( $stats['errors_window'] ) ); ?></span>
+				<span class="kpi-label">
+					<?php esc_html_e( 'System Errors', 'wc-erp-sync' ); ?>
+					<small class="time-range-badge" id="lbl-error-range" style="display: block; font-size: 11px; color: #ef4444; font-weight: 500;">(Last 24h)</small>
+				</span>
 			</div>
 		</div>
 	</section>
