@@ -339,6 +339,17 @@ class Engine {
 			$entity_type = $item['entity_type'];
 			$action      = $item['action'];
 			$payload     = ! empty( $item['payload'] ) ? json_decode( $item['payload'], true ) : [];
+			if ( ! is_array( $payload ) ) {
+				$payload = [];
+			}
+
+			// Ensure external_id and local_id are passed to module payload if present in queue item record
+			if ( empty( $payload['external_id'] ) && ! empty( $item['external_id'] ) ) {
+				$payload['external_id'] = (string) $item['external_id'];
+			}
+			if ( empty( $payload['local_id'] ) && ! empty( $item['local_id'] ) ) {
+				$payload['local_id'] = intval( $item['local_id'] );
+			}
 
 			$module = $registry->get_module( $entity_type );
 			if ( ! $module ) {
@@ -385,14 +396,38 @@ class Engine {
 
 		Logger::info( sprintf( 'Starting incremental sync for changes since %s...', $since ), 'sync_engine' );
 
+		// Backlog protection: don't flood queue if already backed up with uncompleted jobs
+		$pending_count = \WCErpSync\Database\QueueTable::count_by_status( 'pending' );
+		if ( $pending_count > 500 ) {
+			Logger::info( sprintf( 'Sync queue already has %d pending jobs. Skipping incremental enqueue to prevent backlog.', $pending_count ), 'sync_engine' );
+			return [
+				'since'       => $since,
+				'total'       => 0,
+				'queued'      => 0,
+				'product_ids' => [],
+			];
+		}
+
 		$client = \WCErpSync\API\ClientFactory::get_client();
 		$result = $client->fetch_changed_products( $since );
 
 		$queued = 0;
 		if ( ! empty( $result['product_ids'] ) ) {
-			foreach ( $result['product_ids'] as $ext_id ) {
-				// Queue item for background processing
-				QueueManager::enqueue_import( 'product', (string) $ext_id, [ 'external_id' => (string) $ext_id ] );
+			// Enqueue in reasonable batches (up to 150) so queue stays manageable
+			$ids_to_queue = array_slice( $result['product_ids'], 0, 150 );
+			foreach ( $ids_to_queue as $ext_id ) {
+				$payload = [ 'external_id' => (string) $ext_id ];
+				$local_id = \WCErpSync\Database\MappingTable::get_local_id( 'product', (string) $ext_id );
+				if ( $local_id ) {
+					$existing_prod = wc_get_product( $local_id );
+					if ( $existing_prod ) {
+						$p_sku = $existing_prod->get_sku();
+						if ( ! empty( $p_sku ) ) {
+							$payload['sku'] = $p_sku;
+						}
+					}
+				}
+				QueueManager::enqueue_import( 'product', (string) $ext_id, $payload );
 				$queued++;
 			}
 		}

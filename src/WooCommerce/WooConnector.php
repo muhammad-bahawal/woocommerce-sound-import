@@ -231,6 +231,15 @@ class WooConnector {
 
 		// Post-save: Enforce postmeta, WooCommerce stock tracking, and lookup table synchronization
 		if ( $product_id ) {
+			// Track catalog sync timestamps for dashboard metrics and product matching
+			update_post_meta( $product_id, '_erp_sync_last_catalog_update', time() );
+			if ( $is_new ) {
+				update_post_meta( $product_id, '_erp_sync_created_time', time() );
+			}
+			if ( ! empty( $data['external_id'] ) ) {
+				update_post_meta( $product_id, '_erp_external_id', sanitize_text_field( (string) $data['external_id'] ) );
+			}
+
 			if ( $has_stock_val ) {
 				$stock_quantity = max( 0, intval( $data['stock'] ) );
 				if ( $is_backorder ) {

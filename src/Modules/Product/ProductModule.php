@@ -42,6 +42,73 @@ class ProductModule extends BaseModule {
 		$external_id = (string) $raw_data['external_id'];
 		$sku         = isset( $raw_data['sku'] ) ? sanitize_text_field( $raw_data['sku'] ) : '';
 
+		// 1. Resolve SKU from local mapping if missing
+		if ( empty( $sku ) ) {
+			$local_id = MappingTable::get_local_id( 'product', $external_id );
+			if ( $local_id ) {
+				$existing_product = wc_get_product( $local_id );
+				if ( $existing_product ) {
+					$sku = sanitize_text_field( $existing_product->get_sku() );
+					if ( ! empty( $sku ) ) {
+						$raw_data['sku'] = $sku;
+					}
+				}
+			}
+
+			// If not found in mapping table, check if product exists in WooCommerce by meta _erp_external_id
+			if ( empty( $sku ) ) {
+				$meta_prods = get_posts( [
+					'post_type'      => [ 'product', 'product_variation' ],
+					'posts_per_page' => 1,
+					'fields'         => 'ids',
+					'meta_query'     => [
+						[
+							'key'   => '_erp_external_id',
+							'value' => $external_id,
+						],
+					],
+				] );
+				if ( ! empty( $meta_prods ) ) {
+					$existing_product = wc_get_product( $meta_prods[0] );
+					if ( $existing_product ) {
+						$sku = sanitize_text_field( $existing_product->get_sku() );
+						if ( ! empty( $sku ) ) {
+							$raw_data['sku'] = $sku;
+							$this->add_mapping( $external_id, $meta_prods[0] );
+						}
+					}
+				}
+			}
+		}
+
+		// 2. If SKU is still missing and payload has no details, fetch product directly by external ID
+		if ( empty( $sku ) && empty( $raw_data['title'] ) && empty( $raw_data['name'] ) ) {
+			$client = ClientFactory::get_client();
+			if ( method_exists( $client, 'fetch_product_by_id' ) ) {
+				$by_id = $client->fetch_product_by_id( $external_id );
+				if ( ! empty( $by_id ) && is_array( $by_id ) ) {
+					foreach ( $by_id as $k => $v ) {
+						if ( ! empty( $v ) || ! isset( $raw_data[ $k ] ) ) {
+							$raw_data[ $k ] = $v;
+						}
+					}
+					$sku = isset( $raw_data['sku'] ) ? sanitize_text_field( $raw_data['sku'] ) : '';
+				}
+			}
+		}
+
+		// 3. If still completely missing SKU and product name, log warning and skip (prevents 450+ false errors)
+		if ( empty( $sku ) && empty( $raw_data['title'] ) && empty( $raw_data['name'] ) ) {
+			$this->log( 'warning', sprintf( 'Skipping Product ERP ID %s: Product record could not be resolved from API or local store.', $external_id ) );
+			return false;
+		}
+
+		// Assign fallback SKU if name is present but SKU was omitted
+		if ( empty( $sku ) ) {
+			$sku             = 'SI-' . $external_id;
+			$raw_data['sku'] = $sku;
+		}
+
 		// Performance check: If raw_data already has title/name and content, it came from
 		// categories or products list endpoint and does not need expensive individual SKU queries.
 		$has_title          = ! empty( $raw_data['title'] ) || ! empty( $raw_data['name'] );

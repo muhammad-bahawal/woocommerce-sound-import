@@ -104,7 +104,7 @@ $errors  = DashController::get_recent_errors( 5 );
 		</div>
 
 		<!-- 6. Pending Queue Items -->
-		<div class="kpi-card">
+		<div class="kpi-card" style="cursor: pointer;" title="<?php esc_attr_e( 'Click to view background sync queue', 'wc-erp-sync' ); ?>" onclick="window.location='<?php echo esc_url( admin_url( 'admin.php?page=wc-erp-sync&tab=queue' ) ); ?>'">
 			<div class="kpi-icon-wrapper orange">
 				<span class="dashicons dashicons-list-view"></span>
 			</div>
@@ -115,7 +115,7 @@ $errors  = DashController::get_recent_errors( 5 );
 		</div>
 
 		<!-- 7. Errors in Selected Window -->
-		<div class="kpi-card">
+		<div class="kpi-card" style="cursor: pointer;" title="<?php esc_attr_e( 'Click to view system audit logs', 'wc-erp-sync' ); ?>" onclick="window.location='<?php echo esc_url( admin_url( 'admin.php?page=wc-erp-sync&tab=logs' ) ); ?>'">
 			<div class="kpi-icon-wrapper red">
 				<span class="dashicons dashicons-warning"></span>
 			</div>

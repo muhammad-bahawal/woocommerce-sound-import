@@ -573,6 +573,82 @@ class SoundImportsClient extends AbstractClient {
 	}
 
 	/**
+	 * Fetch a single product by external ID from the SoundImports Scraper FastAPI endpoint.
+	 * Tries multiple endpoints to retrieve product details by ID or external ID.
+	 *
+	 * @param string|int $id Product external/internal ID.
+	 * @return array Normalized product payload array, or empty array on failure.
+	 */
+	public function fetch_product_by_id( $id ) {
+		$this->load_settings();
+
+		$id_clean = sanitize_text_field( (string) $id );
+		if ( empty( $id_clean ) ) {
+			return [];
+		}
+
+		Logger::info( sprintf( 'Fetching live product by ID %s from SoundImports API (URL: %s)...', $id_clean, $this->settings['api_url'] ), 'api_client' );
+
+		$endpoints = [
+			'api/product/' . rawurlencode( $id_clean ),
+			'api/products/' . rawurlencode( $id_clean ),
+			'api/product/id/' . rawurlencode( $id_clean ),
+			'api/products/id/' . rawurlencode( $id_clean ),
+			'api/products?id=' . rawurlencode( $id_clean ),
+			'api/products?external_id=' . rawurlencode( $id_clean ),
+			'api/products?search=' . rawurlencode( $id_clean ),
+		];
+
+		$last_error = '';
+
+		foreach ( $endpoints as $endpoint ) {
+			$response = $this->request( $endpoint, 'GET' );
+
+			if ( is_wp_error( $response ) ) {
+				$last_error = sprintf( '%s (HTTP Code: %s)', $response->get_error_message(), $response->get_error_code() );
+				continue;
+			}
+
+			$code = wp_remote_retrieve_response_code( $response );
+			if ( $code < 200 || $code >= 300 ) {
+				continue;
+			}
+
+			$body = wp_remote_retrieve_body( $response );
+			$data = json_decode( $body, true );
+
+			if ( ! is_array( $data ) ) {
+				continue;
+			}
+
+			// If search/list endpoint returned array of products
+			if ( isset( $data['products'] ) && is_array( $data['products'] ) && ! empty( $data['products'] ) ) {
+				foreach ( $data['products'] as $prod ) {
+					$p_id = ! empty( $prod['id'] ) ? (string) $prod['id'] : ( ! empty( $prod['external_id'] ) ? (string) $prod['external_id'] : '' );
+					if ( $p_id === $id_clean ) {
+						Logger::info( sprintf( 'Successfully matched product ID %s via endpoint %s.', $id_clean, $endpoint ), 'api_client' );
+						return $this->normalize_product_payload( $prod );
+					}
+				}
+				// If first item in list has valid SKU or title, check if external ID matches
+				if ( ! empty( $data['products'][0]['sku'] ) || ! empty( $data['products'][0]['title'] ) ) {
+					return $this->normalize_product_payload( $data['products'][0] );
+				}
+			}
+
+			// Single product payload
+			if ( ! empty( $data['sku'] ) || ! empty( $data['title'] ) || ! empty( $data['id'] ) || ! empty( $data['external_id'] ) ) {
+				$normalized = $this->normalize_product_payload( $data );
+				Logger::info( sprintf( 'Successfully fetched product ID %s via endpoint %s.', $id_clean, $endpoint ), 'api_client' );
+				return $normalized;
+			}
+		}
+
+		Logger::warning( sprintf( 'Could not resolve product ID %s via API fallback endpoints. Last error: %s', $id_clean, $last_error ), 'api_client' );
+		return [];
+	}
+
+	/**
 	 * Fetch IDs of products changed since a given date string.
 	 * Endpoint: api/products/changed?since={YYYY-MM-DD}
 	 *

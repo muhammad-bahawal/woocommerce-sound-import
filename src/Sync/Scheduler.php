@@ -113,25 +113,84 @@ class Scheduler {
 	}
 
 	/**
-	 * Cron Execution Callback for full incremental sync.
+	 * Cron Execution Callback for full incremental sync and catalog batch processing.
 	 */
 	public static function run_scheduled_sync() {
 		Logger::info( 'Starting scheduled sync loop...', 'scheduler' );
 		
-		$history_id = \WCErpSync\Database\HistoryTable::start_job( 'cron_incremental' );
+		$history_id      = \WCErpSync\Database\HistoryTable::start_job( 'cron_incremental' );
+		$total_processed = 0;
+		$total_success   = 0;
+		$total_failed    = 0;
 
-		// 1. Check ERP for changed products and queue them
+		// 1. Process pending sync queue items first (up to 50 items per cron cycle)
+		$queue_processed = Engine::process_sync_queue( 50 );
+		if ( $queue_processed > 0 ) {
+			$total_processed += $queue_processed;
+			$total_success   += $queue_processed;
+			Logger::info( sprintf( 'Cron completed processing %d queue items.', $queue_processed ), 'scheduler' );
+		}
+
+		// 2. Check ERP for changed products and queue up to a capped batch
 		$res = Engine::run_incremental_sync();
 		Logger::info( sprintf( 'Cron completed incremental scan. %d changed products queued for date %s.', $res['queued'], $res['since'] ), 'scheduler' );
 
-		// 2. Process sync queue items immediately (up to 50 items per cron cycle)
-		$processed = Engine::process_sync_queue( 50 );
-		if ( $processed > 0 ) {
-			Logger::info( sprintf( 'Cron completed processing %d queue items.', $processed ), 'scheduler' );
+		// 3. Automated Catalog Synchronization Batch (fetches new & updated products page by page)
+		try {
+			$client      = \WCErpSync\API\ClientFactory::get_client();
+			$prod_module = \WCErpSync\Modules\Registry::instance()->get_module( 'product' );
+
+			if ( $prod_module && method_exists( $client, 'fetch_products' ) ) {
+				$current_page = max( 1, (int) get_option( 'wc_erp_sync_next_page', 1 ) );
+				$batch_limit  = 25; // 25 products per scheduled cycle keeps server execution fast (<15s)
+
+				$cat_res = $client->fetch_products( [ 'page' => $current_page, 'limit' => $batch_limit ] );
+				if ( ! empty( $cat_res['items'] ) ) {
+					$cat_success = 0;
+					$cat_failed  = 0;
+					$cat_created = 0;
+					$cat_updated = 0;
+
+					foreach ( $cat_res['items'] as $item ) {
+						$total_processed++;
+						$sku         = isset( $item['sku'] ) ? sanitize_text_field( $item['sku'] ) : '';
+						$ext_id      = isset( $item['external_id'] ) ? (string) $item['external_id'] : '';
+						$existing_id = ! empty( $sku ) ? wc_get_product_id_by_sku( $sku ) : 0;
+						if ( ! $existing_id && ! empty( $ext_id ) ) {
+							$existing_id = \WCErpSync\Database\MappingTable::get_local_id( 'product', $ext_id );
+						}
+						$is_new = empty( $existing_id );
+
+						$local_id = $prod_module->import_item( $item );
+						if ( $local_id ) {
+							$cat_success++;
+							$total_success++;
+							if ( $is_new ) {
+								$cat_created++;
+							} else {
+								$cat_updated++;
+							}
+						} else {
+							$cat_failed++;
+							$total_failed++;
+						}
+					}
+
+					$next_page = ! empty( $cat_res['has_more'] ) ? ( $current_page + 1 ) : 1;
+					update_option( 'wc_erp_sync_next_page', $next_page );
+
+					Logger::info( sprintf( 'Scheduled catalog batch (Page %d -> Next %d): %d synced (%d added, %d updated, %d failed).', $current_page, $next_page, $cat_success, $cat_created, $cat_updated, $cat_failed ), 'scheduler' );
+				} elseif ( empty( $cat_res['error'] ) ) {
+					// Reached end of catalog; reset to page 1 for continuous cyclical sync
+					update_option( 'wc_erp_sync_next_page', 1 );
+				}
+			}
+		} catch ( \Exception $e ) {
+			Logger::error( 'Exception during scheduled catalog batch sync: ' . $e->getMessage(), 'scheduler' );
 		}
 
 		if ( $history_id ) {
-			\WCErpSync\Database\HistoryTable::update_job_progress( $history_id, $processed, $processed, 0 );
+			\WCErpSync\Database\HistoryTable::update_job_progress( $history_id, $total_processed, $total_success, $total_failed );
 			\WCErpSync\Database\HistoryTable::complete_job( $history_id, 'completed' );
 		}
 	}

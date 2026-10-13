@@ -177,8 +177,32 @@ foreach ( $tables as $table_name ) {
 					<?php esc_html_e( 'WordPress built-in cron relies on frontend visitor traffic. If no visitors visit this staging website while you are logged out, WordPress background tasks stay asleep. To make background automation trigger 100% reliably 24/7 without logging in, add this command to your Server Crontab or cPanel Cron Jobs (Every 15-30 Minutes):', 'wc-erp-sync' ); ?>
 				</p>
 				<code style="display: block; background: #0f172a; color: #38bdf8; padding: 10px 14px; border-radius: 6px; font-size: 13px; user-select: all;">
-					wget -q -O - <?php echo esc_url( site_url( 'wp-cron.php?doing_wp_cron' ) ); ?> >/dev/null 2>&1
+					wget -q -O - <?php echo esc_url( site_url( 'wp-cron.php?doing_wp_cron' ) ); ?> &gt;/dev/null 2&gt;&amp;1
 				</code>
+			</div>
+
+			<!-- Quick Database & Queue Maintenance Tools -->
+			<div style="margin-top: 20px; padding: 16px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px;">
+				<h4 style="margin: 0 0 8px 0; font-size: 14px; font-weight: 600; color: #1e293b;">
+					<span class="dashicons dashicons-admin-tools" style="color: #6366f1;"></span> <?php esc_html_e( 'System Maintenance & Cleanup Tools', 'wc-erp-sync' ); ?>
+				</h4>
+				<p style="margin: 0 0 12px 0; font-size: 13px; color: #64748b;">
+					<?php esc_html_e( 'Use these maintenance tools to wipe old error logs and clear stuck pending queue backlogs with a single click.', 'wc-erp-sync' ); ?>
+				</p>
+				<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+					<button id="btn-clear-logs" class="btn btn-outline-danger" style="display: inline-flex; align-items: center; gap: 6px;">
+						<span class="dashicons dashicons-trash"></span>
+						<?php esc_html_e( 'Clear All System Error Logs', 'wc-erp-sync' ); ?>
+					</button>
+					<button id="btn-clear-queue" class="btn btn-outline-danger" style="display: inline-flex; align-items: center; gap: 6px;">
+						<span class="dashicons dashicons-dismiss"></span>
+						<?php esc_html_e( 'Reset & Clear Pending Sync Queue', 'wc-erp-sync' ); ?>
+					</button>
+					<a href="<?php echo esc_url( admin_url( 'admin.php?page=wc-erp-sync&tab=sync' ) ); ?>" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px;">
+						<span class="dashicons dashicons-update"></span>
+						<?php esc_html_e( 'Run Manual Sync Batch', 'wc-erp-sync' ); ?>
+					</a>
+				</div>
 			</div>
 		</div>
 	</div>

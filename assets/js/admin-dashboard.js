@@ -439,7 +439,11 @@ jQuery(document).ready(function($) {
             },
             success: function(response) {
                 if (response.success) {
-                    loadLogRecords(1);
+                    if (typeof loadLogRecords === 'function' && $('#logs-data-table').length) {
+                        loadLogRecords(1);
+                    } else {
+                        window.location.reload();
+                    }
                 }
             }
         });

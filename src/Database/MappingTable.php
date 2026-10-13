@@ -82,13 +82,12 @@ class MappingTable {
 				$table,
 				[
 					'last_stock_updated_at' => $now,
-					'updated_at'            => $now,
 				],
 				[
 					'entity_type' => 'product',
 					'local_id'    => (int) $local_id,
 				],
-				[ '%s', '%s' ],
+				[ '%s' ],
 				[ '%s', '%d' ]
 			);
 
@@ -97,13 +96,12 @@ class MappingTable {
 					$table,
 					[
 						'last_stock_updated_at' => $now,
-						'updated_at'            => $now,
 					],
 					[
 						'entity_type' => 'product',
 						'external_id' => (string) $external_id,
 					],
-					[ '%s', '%s' ],
+					[ '%s' ],
 					[ '%s', '%s' ]
 				);
 			}
@@ -251,23 +249,31 @@ class MappingTable {
 		global $wpdb;
 		$table = self::get_table_name();
 		$hours = max( 1, intval( $hours ) );
+		$count = 0;
 
-		// Check if created_at column exists in table (dbDelta may not have run yet)
+		// Check if created_at column exists in table
 		$has_col = $wpdb->get_results( "SHOW COLUMNS FROM $table LIKE 'created_at'" );
-		if ( empty( $has_col ) ) {
-			return 0;
+		if ( ! empty( $has_col ) ) {
+			$query = $wpdb->prepare(
+				"SELECT COUNT(id) FROM $table 
+				 WHERE entity_type = %s 
+				   AND created_at IS NOT NULL 
+				   AND created_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)",
+				$entity_type,
+				$hours
+			);
+			$count = (int) $wpdb->get_var( $query );
 		}
 
-		$query = $wpdb->prepare(
-			"SELECT COUNT(id) FROM $table 
-			 WHERE entity_type = %s 
-			   AND created_at IS NOT NULL 
-			   AND created_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)",
-			$entity_type,
-			$hours
-		);
+		// Also check WooCommerce products created in this window with sync meta
+		$meta_count = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(DISTINCT post_id) FROM {$wpdb->postmeta} 
+			 WHERE meta_key = '_erp_sync_created_time' 
+			   AND meta_value >= %d",
+			time() - ( $hours * 3600 )
+		) );
 
-		return (int) $wpdb->get_var( $query );
+		return max( $count, $meta_count );
 	}
 
 	/**
@@ -277,6 +283,7 @@ class MappingTable {
 		global $wpdb;
 		$table = self::get_table_name();
 		$hours = max( 1, intval( $hours ) );
+		$count = 0;
 
 		$has_col = $wpdb->get_results( "SHOW COLUMNS FROM $table LIKE 'created_at'" );
 		if ( empty( $has_col ) ) {
@@ -288,20 +295,29 @@ class MappingTable {
 				$entity_type,
 				$hours
 			);
-			return (int) $wpdb->get_var( $query );
+			$count = (int) $wpdb->get_var( $query );
+		} else {
+			// Updated: updated_at within window AND (created_at is null OR created_at < DATE_SUB(updated_at, INTERVAL 5 SECOND))
+			$query = $wpdb->prepare(
+				"SELECT COUNT(id) FROM $table 
+				 WHERE entity_type = %s 
+				   AND updated_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)
+				   AND (created_at IS NULL OR created_at < DATE_SUB(updated_at, INTERVAL 5 SECOND))",
+				$entity_type,
+				$hours
+			);
+			$count = (int) $wpdb->get_var( $query );
 		}
 
-		// Updated: updated_at within window AND (created_at is null OR created_at < updated_at or created_at outside window)
-		$query = $wpdb->prepare(
-			"SELECT COUNT(id) FROM $table 
-			 WHERE entity_type = %s 
-			   AND updated_at >= DATE_SUB(NOW(), INTERVAL %d HOUR)
-			   AND (created_at IS NULL OR created_at < DATE_SUB(updated_at, INTERVAL 5 SECOND))",
-			$entity_type,
-			$hours
-		);
+		// Also check WooCommerce post meta _erp_sync_last_catalog_update as secondary source / fallback
+		$meta_count = (int) $wpdb->get_var( $wpdb->prepare(
+			"SELECT COUNT(DISTINCT post_id) FROM {$wpdb->postmeta} 
+			 WHERE meta_key = '_erp_sync_last_catalog_update' 
+			   AND meta_value >= %d",
+			time() - ( $hours * 3600 )
+		) );
 
-		return (int) $wpdb->get_var( $query );
+		return max( $count, $meta_count );
 	}
 
 	/**
